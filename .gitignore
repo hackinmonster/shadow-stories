@@ -43,3 +43,5 @@ models/
 # Legacy local experiment folder
 ElevenLabs_TTS - Shadow Stories/
 .planning
+
+models
