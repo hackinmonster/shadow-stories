@@ -4,6 +4,16 @@ Shadow Stories is a real-time shadow-puppet storyteller.
 
 It watches a hand-shadow animal on camera, classifies the animal + motion, generates a short story continuation with Gemini, then speaks it with ElevenLabs. Local ambient audio and animal SFX are included.
 
+
+![ElevenLabs Badge](https://img.shields.io/badge/ElevenLabs-000?logo=elevenlabs&logoColor=fff&style=flat)
+![Google Gemini Badge](https://img.shields.io/badge/Google%20Gemini-8E75B2?logo=googlegemini&logoColor=fff&style=flat)
+![Python Badge](https://img.shields.io/badge/Python-3776AB?logo=python&logoColor=fff&style=flat)
+![Hugging Face Badge](https://img.shields.io/badge/Hugging%20Face-FFD21E?logo=huggingface&logoColor=000&style=flat)
+![OpenCV Badge](https://img.shields.io/badge/OpenCV-5C3EE8?logo=opencv&logoColor=fff&style=flat)
+
+<img src="https://github.com/user-attachments/assets/77d812d1-ab0b-4302-919f-2a3a5b7d854d" width="300" />
+
+
 ## What It Does
 
 - Detects shadow silhouettes from webcam frames.
