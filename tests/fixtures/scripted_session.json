@@ -1,0 +1,4 @@
+{
+  "description": "10-turn scripted session always selecting first choice (index 0)",
+  "scripted_choices": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+}

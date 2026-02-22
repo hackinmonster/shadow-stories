@@ -1,0 +1,5 @@
+[
+  {"type": "ChoiceMade", "turn_number": 1, "choice_index": 0, "choice_text": "Climb the tree"},
+  {"type": "ArcPhaseChanged", "previous_phase": "setup", "new_phase": "rising_action", "trigger": "explicit"},
+  {"type": "StateUpdated", "field_path": "scene_state.active_location", "description": "Forest clearing"}
+]

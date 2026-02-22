@@ -1,0 +1,45 @@
+# Environment / secrets
+.env
+.env.local
+.env.*.local
+
+# Virtualenv / Python cache
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.so
+
+# Tool caches
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Build / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# Runtime outputs
+logs/
+*.log
+
+# Local model artifacts
+models/
+*.pt
+*.pth
+
+# Editor / OS junk
+.DS_Store
+.idea/
+.vscode/
+
+# Local assistant/planning artifacts
+.claude/
+.planning/
+
+# Legacy local experiment folder
+ElevenLabs_TTS - Shadow Stories/
+.planning
