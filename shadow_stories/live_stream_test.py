@@ -49,7 +49,11 @@ _CONTEXT_MAXLEN = 4
 # min seconds between Gemini inferences
 _INFERENCE_INTERVAL = 10.0
 # min observations to collect before allowing an inference
-_MIN_OBSERVATIONS = 5
+_MIN_OBSERVATIONS = 6
+# minimum same-animal hits in a batch before playing that animal's SFX
+_SFX_MIN_ANIMAL_HITS = 4
+# minimum same-animal hits in a batch before switching narration to that animal
+_NARRATION_SWITCH_MIN_HITS = 3
 # how often to poll the classifier (seconds)
 _POLL_INTERVAL = 0.4
 _VOICE_SAMPLE_RATE = 16000
@@ -92,6 +96,21 @@ def _summarize_observations(observations: list[str]) -> str:
     return Counter(observations).most_common(1)[0][0]
 
 
+def _split_shadow_context(shadow_input: str) -> tuple[str, str]:
+    """Split summarized shadow context into animal and action."""
+    parts = shadow_input.split(maxsplit=1)
+    animal = parts[0] if parts else "unknown"
+    action = parts[1] if len(parts) > 1 else "still"
+    return animal, action
+
+
+def _count_animal_hits(observations: list[str], animal: str) -> int:
+    """Count how many observations in the batch match the chosen animal."""
+    if not animal:
+        return 0
+    return sum(1 for obs in observations if obs.split(maxsplit=1)[0] == animal)
+
+
 def _build_prompt(
     voice: str,
     shadow_input: str,
@@ -131,7 +150,8 @@ def _build_prompt(
 
 def _print_banner(
     iteration: int,
-    shadow_input: str,
+    shadow_animal: str,
+    shadow_action: str,
     voice: str,
     ctx_len: int,
     facts_len: int,
@@ -142,7 +162,7 @@ def _print_banner(
         f"\n[{ts}] #{iteration}"
         f"  facts={facts_len}"
         f"  ctx={ctx_len}/{_CONTEXT_MAXLEN}"
-        f"  classifier={shadow_input!r}"
+        f"  prompt_ctx=animal:{shadow_animal!r} action:{shadow_action!r}"
         f"  voice={voice_display}"
     )
     print("  Narrating...", end="", flush=True)
@@ -276,6 +296,8 @@ async def _run(
     observations: list[str] = []
     last_inference = 0.0
     prev_animal: str | None = None
+    confirmed_animal: str | None = None
+    confirmed_action = "still"
     _sfx_task: asyncio.Task | None = None
 
     _open_log()
@@ -288,6 +310,8 @@ async def _run(
     print(f"Gemini model: {model}")
     print(f"Context window: {_CONTEXT_MAXLEN}")
     print(f"Inference interval: {inference_interval}s  min obs: {min_obs}")
+    print(f"SFX confirm hits: {_SFX_MIN_ANIMAL_HITS}")
+    print(f"Narration switch hits: {_NARRATION_SWITCH_MIN_HITS}")
     print(f"Interactive voice: {interactive} ({'microphone' if interactive else 'off'})")
     print(f"Debug window: {debug}")
     print("-" * 64)
@@ -295,17 +319,14 @@ async def _run(
     iteration = 1
     try:
         while count is None or iteration <= count:
-            t_cls = time.monotonic()
             try:
                 shadow_label, shadow_motion = shadow_classifier.predict(debug=debug)
             except Exception:
                 shadow_label, shadow_motion = "unknown shadow", "still"
-            cls_ms = (time.monotonic() - t_cls) * 1000
 
             if shadow_label:
                 desc = f"{shadow_label} {shadow_motion}" if shadow_motion and shadow_motion != "still" else shadow_label
                 observations.append(desc)
-                print(f"  [classify] {desc} ({cls_ms:.0f}ms)")
 
             now = time.monotonic()
             elapsed = now - last_inference
@@ -320,25 +341,58 @@ async def _run(
 
             # batch the collected observations into a single shadow description
             shadow_input = _summarize_observations(observations)
+            shadow_animal, shadow_action = _split_shadow_context(shadow_input)
+            same_animal_hits = _count_animal_hits(observations, shadow_animal)
             observations.clear()
             last_inference = now
 
-            # extract bare animal name (first word before any motion descriptor)
-            current_animal = shadow_input.split()[0] if shadow_input else None
+            raw_animal = shadow_animal
+            raw_action = shadow_action
+
+            # Keep narration stable, but switch when new animal is repeated in this batch.
+            if raw_animal and not raw_animal.startswith("unknown"):
+                if confirmed_animal is None:
+                    confirmed_animal = raw_animal
+                    confirmed_action = raw_action
+                elif raw_animal == confirmed_animal:
+                    confirmed_action = raw_action
+                elif same_animal_hits >= _NARRATION_SWITCH_MIN_HITS:
+                    confirmed_animal = raw_animal
+                    confirmed_action = raw_action
+
+            prompt_animal = confirmed_animal or raw_animal
+            prompt_action = confirmed_action if confirmed_animal else raw_action
+            shadow_input_for_prompt = (
+                f"{prompt_animal} {prompt_action}".strip()
+                if prompt_action and prompt_action != "still"
+                else (prompt_animal or "")
+            )
+            current_animal = prompt_animal if shadow_input_for_prompt else None
 
             voice = await _get_voice(interactive, stt_client, stt_model)
 
             # fire SFX on animal transition (runs in background, won't block narration)
-            if current_animal and current_animal != prev_animal:
+            if (
+                current_animal
+                and current_animal != prev_animal
+                and same_animal_hits >= _SFX_MIN_ANIMAL_HITS
+            ):
                 if _sfx_task is not None and not _sfx_task.done():
                     _sfx_task.cancel()
                 _sfx_task = asyncio.create_task(play_sfx(current_animal))
                 prev_animal = current_animal
 
-            _print_banner(iteration, shadow_input, voice, len(context), len(persistent_facts))
+            _print_banner(
+                iteration,
+                prompt_animal or "unknown",
+                prompt_action or "still",
+                voice,
+                len(context),
+                len(persistent_facts),
+            )
 
             try:
-                prompt = _build_prompt(voice, shadow_input, context, persistent_facts)
+                prompt = _build_prompt(voice, shadow_input_for_prompt, context, persistent_facts)
                 t_gen = time.monotonic()
                 text = await client.generate(prompt)
                 gen_ms = (time.monotonic() - t_gen) * 1000
@@ -347,10 +401,10 @@ async def _run(
                 print(f"  {text}")
                 await enqueue(text)
                 context.append(text)
-                _log(iteration, shadow_input, voice, prompt, text)
+                _log(iteration, shadow_input_for_prompt, voice, prompt, text)
             except GeminiClientError as exc:
                 print(f"\n  [ERROR] {exc}", file=sys.stderr)
-                _log(iteration, shadow_input, voice, prompt, f"[ERROR] {exc}")
+                _log(iteration, shadow_input_for_prompt, voice, prompt, f"[ERROR] {exc}")
 
             if voice:
                 persistent_facts.append(voice)

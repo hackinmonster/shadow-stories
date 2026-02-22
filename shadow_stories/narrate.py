@@ -61,6 +61,9 @@ the center of the narration. Connect it to what was already happening — maybe 
 interrupts, arrives, scares, or surprises the previous creature — but the new \
 creature should take over the story right away.
 
+The current shadow input is the source of truth for who is on stage now.
+Do not keep narrating an old animal after the shadow input has switched away from it.
+
 The shadow puppets can only be these animals:
 bird, chicken, cow, crab, deer, dog, moose, panther, rabbit, snail.
 

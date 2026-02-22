@@ -21,7 +21,7 @@ VOICE_SETTINGS = {
     "similarity_boost": 0.25,
     "style": 0,
     "use_speaker_boost": False,
-    "speed": 1.0,
+    "speed": 1.15,
 }
 
 SAMPLE_RATE = 22050

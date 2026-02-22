@@ -30,7 +30,7 @@ MOTION_WINDOW = 12
 WALK_THRESH = 10           # right-edge must move this many avg px/frame
 WALK_FAST_THRESH = 22
 MOTION_DIR_THRESH = 0.80
-JUMP_THRESH = 26
+JUMP_THRESH = 36  # requires a stronger upward burst to count as a jump
 JUMP_MIN_PHASE_FRAMES = 3
 JUMP_MIN_SWING = 55
 STILL_DELAY_FRAMES = 75  # ~2.5s at 30fps before reporting "still"
@@ -49,11 +49,15 @@ IMAGENET_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 
 # distinct colors per puppet slot (BGR)
 PUPPET_COLORS = [
-    (0, 255, 0),
-    (255, 100, 0),
-    (0, 100, 255),
-    (255, 0, 255),
+    (70, 150, 230),
+    (220, 150, 70),
+    (210, 120, 120),
+    (180, 170, 90),
 ]
+
+OVERLAY_TEXT_COLOR = (240, 240, 240)
+OVERLAY_TEXT_SHADOW = (20, 20, 20)
+OVERLAY_TEXT_LINE_TYPE = cv2.LINE_AA
 
 
 def _resolve_model_path() -> str:
@@ -158,27 +162,11 @@ def bbox_distance(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) ->
 # -- motion detection --------------------------------------------------------
 
 def _detect_jump(vels: list[tuple[int, int]]) -> bool:
-    if len(vels) < 8:
+    if len(vels) < 2:
         return False
-    up_idxs = [i for i, (_, dy) in enumerate(vels) if dy < -JUMP_THRESH]
-    down_idxs = [i for i, (_, dy) in enumerate(vels) if dy > JUMP_THRESH]
-    if len(up_idxs) < JUMP_MIN_PHASE_FRAMES or len(down_idxs) < JUMP_MIN_PHASE_FRAMES:
-        return False
-    first_up = up_idxs[0]
-    first_down_after_up = next((i for i in down_idxs if i > first_up), None)
-    if first_down_after_up is None:
-        return False
-
-    up_before_down = sum(1 for i in up_idxs if i < first_down_after_up)
-    down_after_up = sum(1 for i in down_idxs if i > first_up)
-    if up_before_down < 2 or down_after_up < JUMP_MIN_PHASE_FRAMES:
-        return False
-
-    ys = [dy for _, dy in vels]
-    swing = max(ys) - min(ys)
-    if swing < JUMP_MIN_SWING:
-        return False
-    return True
+    # Trigger jump from a single strong upward movement in recent frames.
+    recent_dys = [dy for _, dy in vels[-3:]]
+    return any(dy <= -JUMP_THRESH for dy in recent_dys)
 
 
 def compute_motion(velocity_history: deque[tuple[int, int]], label: str | None) -> str:
@@ -296,15 +284,6 @@ class PuppetTracker:
         x2 = min(dw, bx + bw + pad_x)
         y2 = min(dh, by + bh + pad_y)
         cv2.rectangle(display, (x1, y1), (x2, y2), self.color, 2)
-        cv2.putText(
-            display,
-            f"[{self.id}]",
-            (x1 + 4, max(24, y1 - 8)),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.8,
-            self.color,
-            2,
-        )
 
         pts = list(self.trail)
         for i in range(1, len(pts)):
@@ -314,10 +293,42 @@ class PuppetTracker:
 
 
 def _tracker_status_text(t: PuppetTracker) -> str:
-    name = t.confirmed if t.confirmed else "..."
+    if not t.confirmed:
+        return ""
     if t.motion and t.motion != "still":
-        return f"[{t.id}] {name} {t.motion}"
-    return f"[{t.id}] {name}"
+        return f"{t.confirmed} {t.motion}"
+    return t.confirmed
+
+
+def _draw_overlay_text(
+    display: np.ndarray,
+    text: str,
+    org: tuple[int, int],
+    *,
+    scale: float,
+    thickness: int,
+) -> None:
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    cv2.putText(
+        display,
+        text,
+        org,
+        font,
+        scale,
+        OVERLAY_TEXT_SHADOW,
+        thickness + 2,
+        OVERLAY_TEXT_LINE_TYPE,
+    )
+    cv2.putText(
+        display,
+        text,
+        org,
+        font,
+        scale,
+        OVERLAY_TEXT_COLOR,
+        thickness,
+        OVERLAY_TEXT_LINE_TYPE,
+    )
 
 
 def _draw_label_badge(
@@ -329,18 +340,18 @@ def _draw_label_badge(
     y: int,
 ) -> None:
     font = cv2.FONT_HERSHEY_SIMPLEX
-    scale = 0.8
-    thickness = 2
+    scale = 1.5
+    thickness = 4
     (tw, th), baseline = cv2.getTextSize(text, font, scale, thickness)
     dh, dw = display.shape[:2]
     x = max(8, min(x, max(8, dw - tw - 12)))
     y = max(th + 10, min(y, max(th + 10, dh - baseline - 10)))
-    pad = 6
+    pad = 10
     top_left = (x - pad, y - th - pad)
     bottom_right = (x + tw + pad, y + baseline + pad)
     cv2.rectangle(display, top_left, bottom_right, (0, 0, 0), -1)
     cv2.rectangle(display, top_left, bottom_right, color, 2)
-    cv2.putText(display, text, (x, y), font, scale, color, thickness)
+    _draw_overlay_text(display, text, (x, y), scale=scale, thickness=thickness)
 
 
 def draw_split_tracker_labels(display: np.ndarray, trackers: list[PuppetTracker], *, top_y: int = 35) -> None:
@@ -352,18 +363,23 @@ def draw_split_tracker_labels(display: np.ndarray, trackers: list[PuppetTracker]
     ordered = sorted(visible, key=lambda t: t.id)[:2]
     if not ordered:
         return
-    _draw_label_badge(
-        display,
-        _tracker_status_text(ordered[0]),
-        ordered[0].color,
-        x=10,
-        y=top_y,
-    )
+    text0 = _tracker_status_text(ordered[0])
+    if text0:
+        _draw_label_badge(
+            display,
+            text0,
+            ordered[0].color,
+            x=10,
+            y=top_y,
+        )
     if len(ordered) >= 2:
+        text1 = _tracker_status_text(ordered[1])
+        if not text1:
+            return
         dh = display.shape[0]
         _draw_label_badge(
             display,
-            _tracker_status_text(ordered[1]),
+            text1,
             ordered[1].color,
             x=10,
             y=dh - 20,
@@ -499,14 +515,14 @@ def _camera_loop():
             display = frame.copy()
             for t in visible_bg_trackers:
                 t.draw(display)
-            draw_split_tracker_labels(display, visible_bg_trackers, top_y=72)
-            result = label if conf >= MIN_CONFIDENCE else ""
-            status = f"{result}  {conf:.0%}" if result else f"?  {conf:.0%}"
+            debug_display = cv2.resize(display, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
+            draw_split_tracker_labels(debug_display, visible_bg_trackers, top_y=140)
+            status = label if conf >= MIN_CONFIDENCE else ""
             if cur_motion != "still":
-                status += f"  {cur_motion}"
-            cv2.putText(display, status, (10, 36),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1.1, (0, 255, 0), 2)
-            cv2.imshow("shadow debug", display)
+                status = f"{status} {cur_motion}".strip()
+            if status:
+                _draw_overlay_text(debug_display, status, (20, 96), scale=2.2, thickness=6)
+            cv2.imshow("shadow debug", debug_display)
             cv2.waitKey(1)
 
 
@@ -650,8 +666,7 @@ def main():
                 elif results:
                     label, conf = results[0]
                     if conf >= MIN_CONFIDENCE:
-                        cv2.putText(display, f"{label} {conf:.0%}", (10, 40),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 2)
+                        _draw_overlay_text(display, label, (10, 56), scale=1.9, thickness=5)
 
         for t in visible_trackers:
             t.draw(display)

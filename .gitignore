@@ -28,6 +28,7 @@ logs/
 
 # Local model artifacts
 models/
+models
 *.pt
 *.pth
 
@@ -44,4 +45,6 @@ models/
 ElevenLabs_TTS - Shadow Stories/
 .planning
 
-models
+
+# Misc
+DEVPOST.md
