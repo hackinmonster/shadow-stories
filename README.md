@@ -11,8 +11,7 @@ It watches a hand-shadow animal on camera, classifies the animal + motion, gener
 ![Hugging Face Badge](https://img.shields.io/badge/Hugging%20Face-FFD21E?logo=huggingface&logoColor=000&style=flat)
 ![OpenCV Badge](https://img.shields.io/badge/OpenCV-5C3EE8?logo=opencv&logoColor=fff&style=flat)
 
-<img src="https://github.com/user-attachments/assets/77d812d1-ab0b-4302-919f-2a3a5b7d854d" width="300" />
-
+<img src="https://github.com/user-attachments/assets/77d812d1-ab0b-4302-919f-2a3a5b7d854d" width="300" /> [![YouTube](https://img.icons8.com/color/50/000000/youtube-play.png)](https://youtu.be/9TKeCZYLorM) Watch Demo
 
 ## What It Does
 
